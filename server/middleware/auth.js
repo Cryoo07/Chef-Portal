@@ -1,6 +1,8 @@
 import jwt from 'jsonwebtoken'
 import User from '../models/User.js'
 
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_me'
+
 export const protect = async (req, res, next) => {
   const authHeader = req.headers.authorization
   const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null
@@ -10,11 +12,11 @@ export const protect = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    const decoded = jwt.verify(token, JWT_SECRET)
     const user = await User.findById(decoded.id).select('-password')
 
-    if (!user || !user.active) {
-      return res.status(401).json({ message: 'User not found or inactive' })
+    if (!user || !user.isActive || !user.isApproved) {
+      return res.status(401).json({ message: 'User not found, suspended, or unapproved' })
     }
 
     req.user = user

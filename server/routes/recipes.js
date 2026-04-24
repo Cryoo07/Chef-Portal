@@ -1,122 +1,117 @@
 import express from 'express'
 import Recipe from '../models/Recipe.js'
+import User from '../models/User.js'
+import Analytics from '../models/Analytics.js'
 import { protect, authorize } from '../middleware/auth.js'
+import { getDateKey } from '../utils/helpers.js'
 
 const router = express.Router()
 
-router.get('/', protect, async (req, res) => {
-  try {
-    if (req.user.role === 'admin') {
-      const recipes = await Recipe.find().populate('createdBy', 'name email role')
-      return res.json(recipes)
-    }
+router.get('/', async (req, res) => {
+  const { page = 1, limit = 12, category, difficulty, tags, search, sort = 'newest' } = req.query
+  const query = { isPublished: true }
+  if (category) query.category = category
+  if (difficulty) query.difficulty = difficulty
+  if (tags) query.tags = { $in: tags.split(',') }
+  if (search) query.title = { $regex: search, $options: 'i' }
 
-    if (req.user.role === 'chef') {
-      const recipes = await Recipe.find({ createdBy: req.user._id }).populate('createdBy', 'name')
-      return res.json(recipes)
-    }
-
-    const approvedRecipes = await Recipe.find({ status: 'approved' }).populate('createdBy', 'name')
-    res.json(approvedRecipes)
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch recipes', error: error.message })
-  }
+  const sortMap = { newest: { createdAt: -1 }, mostLiked: { likes: -1 }, mostViewed: { views: -1 } }
+  const skip = (Number(page) - 1) * Number(limit)
+  const recipes = await Recipe.find(query)
+    .populate('chef', 'name avatar speciality')
+    .sort(sortMap[sort] || sortMap.newest)
+    .skip(skip)
+    .limit(Number(limit))
+  const total = await Recipe.countDocuments(query)
+  res.json({ recipes, total, page: Number(page), pages: Math.ceil(total / Number(limit)) })
 })
 
-router.get('/:id', protect, async (req, res) => {
-  try {
-    const recipe = await Recipe.findById(req.params.id).populate('createdBy', 'name email')
-    if (!recipe) {
-      return res.status(404).json({ message: 'Recipe not found' })
-    }
-    res.json(recipe)
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch recipe', error: error.message })
-  }
+router.get('/chef/:chefId', async (req, res) => {
+  const recipes = await Recipe.find({ chef: req.params.chefId, isPublished: true }).sort({ createdAt: -1 })
+  res.json(recipes)
 })
 
-router.post('/', protect, authorize('chef', 'admin'), async (req, res) => {
-  try {
-    const { title, description, ingredients } = req.body
-    const recipe = await Recipe.create({
-      title,
-      description,
-      ingredients: ingredients || [],
-      status: req.user.role === 'admin' ? 'approved' : 'pending',
-      createdBy: req.user._id,
-    })
-    res.status(201).json(recipe)
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to create recipe', error: error.message })
-  }
+router.get('/:id', async (req, res) => {
+  const recipe = await Recipe.findById(req.params.id).populate('chef', 'name avatar speciality')
+  if (!recipe) return res.status(404).json({ message: 'Recipe not found' })
+  recipe.views += 1
+  await recipe.save()
+  await Analytics.findOneAndUpdate(
+    { recipeId: recipe._id, date: getDateKey() },
+    { $inc: { views: 1 } },
+    { upsert: true, new: true }
+  )
+  res.json(recipe)
 })
 
-router.put('/:id', protect, async (req, res) => {
-  try {
-    const recipe = await Recipe.findById(req.params.id)
-    if (!recipe) {
-      return res.status(404).json({ message: 'Recipe not found' })
-    }
-
-    if (recipe.createdBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden' })
-    }
-
-    recipe.title = req.body.title || recipe.title
-    recipe.description = req.body.description || recipe.description
-    recipe.ingredients = req.body.ingredients || recipe.ingredients
-    await recipe.save()
-
-    res.json(recipe)
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to update recipe', error: error.message })
-  }
+router.post('/', protect, authorize('chef'), async (req, res) => {
+  const recipe = await Recipe.create({ ...req.body, chef: req.user._id })
+  res.status(201).json(recipe)
 })
 
-router.delete('/:id', protect, async (req, res) => {
-  try {
-    const recipe = await Recipe.findById(req.params.id)
-    if (!recipe) {
-      return res.status(404).json({ message: 'Recipe not found' })
-    }
-
-    if (recipe.createdBy.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Forbidden' })
-    }
-
-    await recipe.deleteOne()
-    res.json({ message: 'Recipe deleted' })
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to delete recipe', error: error.message })
+router.put('/:id', protect, authorize('chef', 'admin'), async (req, res) => {
+  const recipe = await Recipe.findById(req.params.id)
+  if (!recipe) return res.status(404).json({ message: 'Recipe not found' })
+  if (req.user.role !== 'admin' && recipe.chef.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ message: 'Forbidden' })
   }
+  Object.assign(recipe, req.body)
+  await recipe.save()
+  res.json(recipe)
 })
 
-router.patch('/:id/approve', protect, authorize('admin'), async (req, res) => {
-  try {
-    const recipe = await Recipe.findById(req.params.id)
-    if (!recipe) {
-      return res.status(404).json({ message: 'Recipe not found' })
-    }
-    recipe.status = 'approved'
-    await recipe.save()
-    res.json(recipe)
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to approve recipe', error: error.message })
+router.delete('/:id', protect, authorize('chef', 'admin'), async (req, res) => {
+  const recipe = await Recipe.findById(req.params.id)
+  if (!recipe) return res.status(404).json({ message: 'Recipe not found' })
+  if (req.user.role !== 'admin' && recipe.chef.toString() !== req.user._id.toString()) {
+    return res.status(403).json({ message: 'Forbidden' })
   }
+  await recipe.deleteOne()
+  res.json({ message: 'Recipe deleted' })
 })
 
-router.patch('/:id/reject', protect, authorize('admin'), async (req, res) => {
-  try {
-    const recipe = await Recipe.findById(req.params.id)
-    if (!recipe) {
-      return res.status(404).json({ message: 'Recipe not found' })
-    }
-    recipe.status = 'rejected'
-    await recipe.save()
-    res.json(recipe)
-  } catch (error) {
-    res.status(500).json({ message: 'Failed to reject recipe', error: error.message })
+router.post('/:id/like', protect, authorize('user', 'chef'), async (req, res) => {
+  const recipe = await Recipe.findById(req.params.id)
+  const user = await User.findById(req.user._id)
+  if (!recipe || !user) return res.status(404).json({ message: 'Not found' })
+  const hasLiked = recipe.likes.some((id) => id.toString() === req.user._id.toString())
+  if (hasLiked) {
+    recipe.likes = recipe.likes.filter((id) => id.toString() !== req.user._id.toString())
+    user.likedRecipes = user.likedRecipes.filter((id) => id.toString() !== recipe._id.toString())
+  } else {
+    recipe.likes.push(req.user._id)
+    user.likedRecipes.push(recipe._id)
+    await Analytics.findOneAndUpdate(
+      { recipeId: recipe._id, date: getDateKey() },
+      { $inc: { likes: 1 } },
+      { upsert: true, new: true }
+    )
   }
+  await recipe.save()
+  await user.save()
+  res.json({ liked: !hasLiked, likesCount: recipe.likes.length })
+})
+
+router.post('/:id/save', protect, authorize('user', 'chef'), async (req, res) => {
+  const recipe = await Recipe.findById(req.params.id)
+  const user = await User.findById(req.user._id)
+  if (!recipe || !user) return res.status(404).json({ message: 'Not found' })
+  const hasSaved = user.savedRecipes.some((id) => id.toString() === recipe._id.toString())
+  if (hasSaved) {
+    user.savedRecipes = user.savedRecipes.filter((id) => id.toString() !== recipe._id.toString())
+    recipe.savedBy = recipe.savedBy.filter((id) => id.toString() !== req.user._id.toString())
+  } else {
+    user.savedRecipes.push(recipe._id)
+    recipe.savedBy.push(req.user._id)
+    await Analytics.findOneAndUpdate(
+      { recipeId: recipe._id, date: getDateKey() },
+      { $inc: { saves: 1 } },
+      { upsert: true, new: true }
+    )
+  }
+  await user.save()
+  await recipe.save()
+  res.json({ saved: !hasSaved, savedCount: recipe.savedBy.length })
 })
 
 export default router
