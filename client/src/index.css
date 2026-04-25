@@ -4,7 +4,12 @@
 @tailwind utilities;
 
 body {
-  @apply bg-primaryTint text-dark font-sans;
+  @apply bg-[#FAFAFA] text-[#111827] font-sans;
+  line-height: 1.7;
+}
+
+* {
+  @apply transition-all duration-150;
 }
 
 .container-page {
@@ -12,13 +17,38 @@ body {
 }
 
 .btn-primary {
-  @apply bg-primary hover:bg-[#E5520A] text-white rounded-lg px-4 py-2 transition-all;
+  @apply bg-[#FF6B35] hover:bg-[#E85D24] text-white rounded-lg px-4 py-2 font-medium;
+}
+
+.btn-secondary {
+  @apply border border-[#FF6B35] text-[#FF6B35] rounded-lg px-4 py-2 font-medium hover:bg-[#FFF3EE];
 }
 
 .input-base {
-  @apply w-full rounded-lg border border-border px-3 py-2 focus:ring-2 focus:ring-primary focus:outline-none;
+  @apply w-full rounded-lg border border-[#D1D5DB] px-3 py-2 focus:ring-2 focus:ring-[#FF6B35] focus:outline-none bg-white;
 }
 
 .card {
-  @apply bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition;
+  @apply bg-white border border-[#E5E7EB] rounded-xl shadow-sm;
+}
+
+.interactive {
+  @apply transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md;
+}
+
+.hero-orange {
+  background: linear-gradient(135deg, #fff3ee 0%, #ffe4d6 100%);
+}
+
+.section-title {
+  @apply text-2xl font-bold border-l-4 border-[#FF6B35] pl-3;
+  letter-spacing: -0.02em;
+}
+
+.empty-state {
+  @apply card p-8 text-center text-secondary;
+}
+
+.skeleton {
+  @apply animate-pulse bg-gray-200 rounded-lg;
 }

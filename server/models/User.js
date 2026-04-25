@@ -26,6 +26,18 @@ const userSchema = new mongoose.Schema(
     likedRecipes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Recipe' }],
     isActive: { type: Boolean, default: true },
     isApproved: { type: Boolean, default: true },
+    chefVerification: {
+      status: {
+        type: String,
+        enum: ['none', 'pending', 'approved', 'rejected'],
+        default: 'none',
+      },
+      rejectedReason: { type: String, default: '' },
+      notes: { type: String, default: '' },
+      requestedAt: { type: Date, default: null },
+      reviewedAt: { type: Date, default: null },
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    },
   },
   { timestamps: true }
 )
@@ -59,6 +71,7 @@ userSchema.methods.toJSONSafe = function () {
     likedRecipes: this.likedRecipes,
     isActive: this.isActive,
     isApproved: this.isApproved,
+    chefVerification: this.chefVerification,
     createdAt: this.createdAt,
   }
 }

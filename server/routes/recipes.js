@@ -2,10 +2,39 @@ import express from 'express'
 import Recipe from '../models/Recipe.js'
 import User from '../models/User.js'
 import Analytics from '../models/Analytics.js'
+import cloudinary from '../config/cloudinary.js'
+import { upload } from '../middleware/upload.js'
 import { protect, authorize } from '../middleware/auth.js'
+import { requireApproved } from '../middleware/requireApproved.js'
 import { getDateKey } from '../utils/helpers.js'
 
 const router = express.Router()
+
+router.post('/upload', protect, authorize('chef'), requireApproved, upload.single('image'), async (req, res) => {
+  try {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+      return res.status(503).json({
+        success: false,
+        code: 'CLOUDINARY_NOT_CONFIGURED',
+        message: 'Image upload is not configured on server. Configure Cloudinary credentials in .env.',
+      })
+    }
+
+    if (!req.file) return res.status(400).json({ message: 'Image file is required' })
+
+    const result = await new Promise((resolve, reject) => {
+      const stream = cloudinary.uploader.upload_stream({ folder: 'recipenest/recipes' }, (error, uploaded) => {
+        if (error) reject(error)
+        else resolve(uploaded)
+      })
+      stream.end(req.file.buffer)
+    })
+
+    res.json({ url: result.secure_url })
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message })
+  }
+})
 
 router.get('/', async (req, res) => {
   const { page = 1, limit = 12, category, difficulty, tags, search, sort = 'newest' } = req.query
@@ -27,7 +56,15 @@ router.get('/', async (req, res) => {
 })
 
 router.get('/chef/:chefId', async (req, res) => {
-  const recipes = await Recipe.find({ chef: req.params.chefId, isPublished: true }).sort({ createdAt: -1 })
+  const { includeDrafts = 'false' } = req.query
+  const query = { chef: req.params.chefId }
+  if (includeDrafts !== 'true') query.isPublished = true
+  const recipes = await Recipe.find(query).sort({ createdAt: -1 })
+  res.json(recipes)
+})
+
+router.get('/mine/list', protect, authorize('chef'), async (req, res) => {
+  const recipes = await Recipe.find({ chef: req.user._id }).sort({ createdAt: -1 })
   res.json(recipes)
 })
 
@@ -44,9 +81,14 @@ router.get('/:id', async (req, res) => {
   res.json(recipe)
 })
 
-router.post('/', protect, authorize('chef'), async (req, res) => {
-  const recipe = await Recipe.create({ ...req.body, chef: req.user._id })
-  res.status(201).json(recipe)
+router.post('/', protect, authorize('chef'), requireApproved, async (req, res) => {
+  try {
+    process.stdout.write(`createRecipe called by: ${req.user?._id}\n`)
+    const recipe = await Recipe.create({ ...req.body, chef: req.user._id })
+    res.status(201).json(recipe)
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message })
+  }
 })
 
 router.put('/:id', protect, authorize('chef', 'admin'), async (req, res) => {

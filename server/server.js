@@ -16,7 +16,7 @@ dotenv.config()
 
 const app = express()
 const PORT = process.env.PORT || 5000
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/chef_portal'
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/recipe_nest'
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_me'
 
@@ -33,7 +33,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/analytics', analyticsRoutes)
 
 app.get('/', (req, res) => {
-  res.json({ message: 'Chef Portal API is running' })
+  res.json({ message: 'RecipeNest API is running' })
 })
 
 app.get('/api/health', (req, res) => {
@@ -60,7 +60,7 @@ mongoose
     if (!process.env.JWT_SECRET) {
       console.warn('JWT_SECRET is not set. Using development fallback secret.')
     }
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`))
+    app.listen(PORT, () => process.stdout.write(`Server running on port ${PORT}\n`))
   })
   .catch((error) => {
     console.error('MongoDB connection error:', error)

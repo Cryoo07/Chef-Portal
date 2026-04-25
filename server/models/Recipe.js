@@ -13,10 +13,12 @@ const recipeSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
     description: { type: String, required: true },
+    cuisineType: { type: String, default: '' },
     ingredients: { type: [ingredientSchema], default: [] },
     instructions: [{ type: String }],
     cookTime: { type: Number, default: 0 },
     prepTime: { type: Number, default: 0 },
+    totalTime: { type: Number, default: 0 },
     servings: { type: Number, default: 1 },
     difficulty: {
       type: String,
@@ -30,6 +32,12 @@ const recipeSchema = new mongoose.Schema(
     },
     tags: [{ type: String }],
     images: [{ type: String }],
+    nutrition: {
+      calories: { type: Number, default: null },
+      protein: { type: Number, default: null },
+      carbohydrates: { type: Number, default: null },
+      fat: { type: Number, default: null },
+    },
     chef: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     savedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
@@ -38,6 +46,20 @@ const recipeSchema = new mongoose.Schema(
   },
   { timestamps: true }
 )
+
+recipeSchema.pre('save', function (next) {
+  this.totalTime = Number(this.prepTime || 0) + Number(this.cookTime || 0)
+  next()
+})
+
+recipeSchema.post('save', function (error, doc, next) {
+  if (error) {
+    console.error('Recipe save error:', error)
+    next(error)
+  } else {
+    next()
+  }
+})
 
 const Recipe = mongoose.model('Recipe', recipeSchema)
 export default Recipe

@@ -2,8 +2,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import api from '../lib/api'
 
 const AuthContext = createContext(null)
-const TOKEN_KEY = 'chef_portal_token'
-const USER_KEY = 'chef_portal_user'
+const TOKEN_KEY = 'recipe_nest_token'
+const USER_KEY = 'recipe_nest_user'
 
 export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || '')

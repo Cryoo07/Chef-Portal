@@ -15,8 +15,8 @@ export const protect = async (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET)
     const user = await User.findById(decoded.id).select('-password')
 
-    if (!user || !user.isActive || !user.isApproved) {
-      return res.status(401).json({ message: 'User not found, suspended, or unapproved' })
+    if (!user || !user.isActive) {
+      return res.status(401).json({ message: 'User not found or suspended' })
     }
 
     req.user = user

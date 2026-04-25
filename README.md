@@ -1,6 +1,6 @@
-# Chef Portal
+# RecipeNest
 
-Chef Portal is a full-stack MERN chef portfolio and recipe sharing platform with role-based dashboards for Users, Chefs, and Admins.
+RecipeNest is a full-stack MERN chef portfolio and recipe sharing platform with role-based dashboards for Users, Chefs, and Admins.
 
 ## Tech Stack
 

@@ -24,25 +24,61 @@ router.post(
   [
     body('name').notEmpty(),
     body('email').isEmail(),
-    body('password').isLength({ min: 6 }),
+    body('password')
+      .isLength({ min: 8 })
+      .withMessage('Password must be at least 8 characters long')
+      .matches(/[a-z]/)
+      .withMessage('Password must contain at least one lowercase letter')
+      .matches(/[A-Z]/)
+      .withMessage('Password must contain at least one uppercase letter')
+      .matches(/[0-9]/)
+      .withMessage('Password must contain at least one number')
+      .matches(/[^A-Za-z0-9]/)
+      .withMessage('Password must contain at least one special character'),
     body('role').optional().isIn(['user', 'chef']),
+    body('socialLinks.instagram')
+      .optional({ values: 'falsy' })
+      .isURL({ protocols: ['http', 'https'], require_protocol: true })
+      .withMessage('Instagram URL must be a valid http/https URL'),
+    body('socialLinks.youtube')
+      .optional({ values: 'falsy' })
+      .isURL({ protocols: ['http', 'https'], require_protocol: true })
+      .withMessage('YouTube URL must be a valid http/https URL'),
+    body('socialLinks.website')
+      .optional({ values: 'falsy' })
+      .isURL({ protocols: ['http', 'https'], require_protocol: true })
+      .withMessage('Website URL must be a valid http/https URL'),
   ],
   async (req, res) => {
     if (!handleValidation(req, res)) return
     try {
-      const { name, email, password, role, speciality, yearsOfExperience } = req.body
+      const { name, email, password, role = 'user', speciality, yearsOfExperience, bio, socialLinks = {} } = req.body
       const existingUser = await User.findOne({ email })
       if (existingUser) {
         return res.status(400).json({ message: 'Email already in use' })
       }
 
+      const isChefRegistration = role === 'chef'
       const user = await User.create({
         name,
         email,
         password,
-        role: role || 'user',
-        speciality: role === 'chef' ? speciality || '' : '',
-        yearsOfExperience: role === 'chef' ? Number(yearsOfExperience || 0) : 0,
+        role: isChefRegistration ? 'chef' : 'user',
+        speciality: speciality || '',
+        yearsOfExperience: Number(yearsOfExperience || 0),
+        bio: bio || '',
+        socialLinks: {
+          instagram: socialLinks.instagram || '',
+          youtube: socialLinks.youtube || '',
+          website: socialLinks.website || '',
+        },
+        isApproved: isChefRegistration ? false : true,
+        chefVerification: isChefRegistration
+          ? {
+              status: 'pending',
+              requestedAt: new Date(),
+            }
+          : undefined,
       })
       const token = createToken(user._id)
 

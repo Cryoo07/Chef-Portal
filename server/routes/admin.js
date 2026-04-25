@@ -8,14 +8,13 @@ const router = express.Router()
 router.use(protect, authorize('admin'))
 
 router.get('/users', async (req, res) => {
-  const { page = 1, limit = 10, search = '' } = req.query
+  const { search = '' } = req.query
   const query = {
+    role: 'user',
     $or: [{ name: { $regex: search, $options: 'i' } }, { email: { $regex: search, $options: 'i' } }],
   }
-  const skip = (Number(page) - 1) * Number(limit)
-  const users = await User.find(query).select('-password').sort({ createdAt: -1 }).skip(skip).limit(Number(limit))
-  const total = await User.countDocuments(query)
-  res.json({ users, total, page: Number(page), pages: Math.ceil(total / Number(limit)) })
+  const users = await User.find(query).select('-password').sort({ createdAt: -1 })
+  res.json(users)
 })
 
 router.put('/users/:id/status', async (req, res) => {
@@ -32,7 +31,13 @@ router.delete('/users/:id', async (req, res) => {
 })
 
 router.get('/recipes', async (req, res) => {
-  const recipes = await Recipe.find().populate('chef', 'name email').sort({ createdAt: -1 })
+  const { status = 'all', category = 'all', search = '' } = req.query
+  const query = {}
+  if (status === 'published') query.isPublished = true
+  if (status === 'draft') query.isPublished = false
+  if (category !== 'all') query.category = category
+  if (search) query.title = { $regex: search, $options: 'i' }
+  const recipes = await Recipe.find(query).populate('chef', 'name email').sort({ createdAt: -1 })
   res.json(recipes)
 })
 
@@ -42,13 +47,151 @@ router.delete('/recipes/:id', async (req, res) => {
 })
 
 router.get('/analytics', async (req, res) => {
-  const [users, chefs, recipes, analytics] = await Promise.all([
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+  const [users, chefs, recipes, pendingChefRequests, analytics, registrations, recipesByCategory] = await Promise.all([
     User.countDocuments({ role: 'user' }),
-    User.countDocuments({ role: 'chef' }),
-    Recipe.countDocuments(),
+    User.countDocuments({ role: 'chef', isApproved: true }),
+    Recipe.countDocuments({ isPublished: true }),
+    User.countDocuments({ 'chefVerification.status': 'pending' }),
     Analytics.find().sort({ date: -1 }).limit(30),
+    User.aggregate([
+      { $match: { createdAt: { $gte: thirtyDaysAgo } } },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$createdAt' },
+          },
+          total: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+      { $project: { date: '$_id', total: 1, _id: 0 } },
+    ]),
+    Recipe.aggregate([
+      { $match: { isPublished: true } },
+      { $group: { _id: '$category', total: { $sum: 1 } } },
+      { $project: { category: '$_id', total: 1, _id: 0 } },
+    ]),
   ])
-  res.json({ users, chefs, recipes, analytics })
+
+  const topRecipes = await Recipe.find({ isPublished: true })
+    .sort({ views: -1 })
+    .limit(5)
+    .populate('chef', 'name')
+    .select('title chef views likes images')
+
+  const topChefs = await Recipe.aggregate([
+    { $match: { isPublished: true } },
+    {
+      $group: {
+        _id: '$chef',
+        recipeCount: { $sum: 1 },
+        totalViews: { $sum: '$views' },
+      },
+    },
+    { $sort: { totalViews: -1 } },
+    { $limit: 5 },
+  ])
+
+  const chefUsers = await User.find({
+    _id: { $in: topChefs.map((item) => item._id) },
+  }).select('name avatar speciality')
+
+  const topActiveChefs = topChefs.map((item) => ({
+    ...item,
+    chef: chefUsers.find((chef) => chef._id.toString() === item._id.toString()),
+  }))
+
+  const recentApplications = await User.find({ 'chefVerification.status': 'pending' })
+    .sort({ 'chefVerification.requestedAt': -1 })
+    .limit(5)
+    .select('name email speciality yearsOfExperience socialLinks chefVerification')
+
+  res.json({
+    users,
+    chefs,
+    recipes,
+    pendingChefRequests,
+    analytics,
+    registrations,
+    recipesByCategory,
+    topRecipes,
+    topActiveChefs,
+    recentApplications,
+  })
+})
+
+router.get('/chef-applications', async (req, res) => {
+  const { tab = 'pending' } = req.query
+  const query = tab === 'approved' ? { role: 'chef', isApproved: true } : { role: 'chef', isApproved: false }
+  const requests = await User.find(query)
+    .select('-password')
+    .sort({ createdAt: -1 })
+  res.json(requests)
+})
+
+router.put('/approve-chef/:id', async (req, res) => {
+  const user = await User.findById(req.params.id)
+  if (!user) return res.status(404).json({ message: 'User not found' })
+  user.role = 'chef'
+  user.isApproved = true
+  user.chefVerification.status = 'approved'
+  user.chefVerification.reviewedAt = new Date()
+  user.chefVerification.reviewedBy = req.user._id
+  await user.save()
+  res.json(user.toJSONSafe())
+})
+
+router.put('/reject-chef/:id', async (req, res) => {
+  const { reason = '' } = req.body
+  const user = await User.findById(req.params.id)
+  if (!user) return res.status(404).json({ message: 'User not found' })
+  user.role = 'user'
+  user.isApproved = true
+  user.chefVerification.status = 'rejected'
+  user.chefVerification.rejectedReason = reason
+  user.chefVerification.reviewedAt = new Date()
+  user.chefVerification.reviewedBy = req.user._id
+  await user.save()
+  res.json(user.toJSONSafe())
+})
+
+router.put('/revoke-chef/:id', async (req, res) => {
+  const user = await User.findById(req.params.id)
+  if (!user) return res.status(404).json({ message: 'User not found' })
+  user.isApproved = false
+  user.chefVerification.status = 'pending'
+  user.chefVerification.reviewedAt = new Date()
+  user.chefVerification.reviewedBy = req.user._id
+  await user.save()
+  res.json(user.toJSONSafe())
+})
+
+router.get('/chef-requests', async (req, res) => {
+  const requests = await User.find({ role: 'chef', isApproved: false }).select('-password').sort({ createdAt: -1 })
+  res.json(requests)
+})
+
+router.put('/chef-requests/:id', async (req, res) => {
+  const { action, reason = '' } = req.body
+  const user = await User.findById(req.params.id)
+  if (!user) return res.status(404).json({ message: 'User not found' })
+  if (action === 'approve') {
+    user.role = 'chef'
+    user.isApproved = true
+    user.chefVerification.status = 'approved'
+  } else {
+    user.role = 'user'
+    user.isApproved = true
+    user.chefVerification.status = 'rejected'
+    user.chefVerification.rejectedReason = reason
+  }
+  user.chefVerification.reviewedAt = new Date()
+  user.chefVerification.reviewedBy = req.user._id
+  await user.save()
+  res.json(user.toJSONSafe())
 })
 
 export default router
